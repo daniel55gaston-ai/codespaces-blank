@@ -1,132 +1,136 @@
 import streamlit as st
+from pptx import Presentation
+from pptx.util import Pt
 import pdfplumber
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.utils import ImageReader
 import io
 
-# Configuración de página
-st.set_page_config(page_title="Generador PDF MT Valero", layout="wide")
+# Configuración de la aplicación
+st.set_page_config(page_title="MT Valero - Editor Pro", layout="wide")
 
-# Inicialización de memoria de sesión
+# Memoria de sesión
 if 'hojas' not in st.session_state:
     st.session_state.hojas = []
 if 'datos_pdf' not in st.session_state:
     st.session_state.datos_pdf = {"cliente": "", "fecha": ""}
 
-st.title("📄 Generador de Reportes PDF Editable")
+st.title("📋 Generador de Reportes: Inyección en Tablas y Cuadros")
 
 # --- BARRA LATERAL ---
 with st.sidebar:
     st.header("1. Carga de Recursos")
+    plantilla = st.file_uploader("Subir tu Plantilla (.pptx)", type=["pptx"])
     archivo_pdf = st.file_uploader("Subir Hoja Valero (PDF)", type=["pdf"])
     fotos_totales = st.file_uploader("Galería de WhatsApp", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
     
-    if archivo_pdf and st.button("🔍 Escanear PDF de Origen"):
+    if archivo_pdf and st.button("🔍 Escanear PDF de Valero"):
         with pdfplumber.open(archivo_pdf) as pdf:
             texto = pdf.pages[0].extract_text()
             for l in texto.split('\n'):
                 if "Cliente:" in l: st.session_state.datos_pdf["cliente"] = l.split("Cliente:")[1].strip()
                 if "Fecha:" in l: st.session_state.datos_pdf["fecha"] = l.split("Fecha:")[1].strip()
-        st.success("Datos de Valero extraídos.")
+        st.success("Datos extraídos correctamente.")
 
-# --- INTERFAZ DE TRABAJO ---
-col_edit, col_prev = st.columns([1, 1])
+# --- CUERPO PRINCIPAL ---
+if not plantilla:
+    st.info("👈 Por favor, sube tu archivo 'Reporte_MT_Final.pptx' para comenzar.")
+else:
+    prs_base = Presentation(io.BytesIO(plantilla.getvalue()))
+    nombres_layouts = [layout.name for layout in prs_base.slide_layouts]
 
-with col_edit:
-    st.subheader("📝 Configurar Nueva Hoja")
-    
-    with st.form("form_pdf", clear_on_submit=True):
-        titulo_hoja = st.text_input("Título de la Hoja:", placeholder="Ej: Inspección de Válvula de Seguridad")
-        cliente = st.text_input("Cliente:", value=st.session_state.datos_pdf["cliente"])
-        descripcion = st.text_area("Descripción Técnica (Times New Roman 12):", height=150)
-        
-        st.write("🖼️ **Selecciona las fotos para esta hoja:**")
-        fotos_seleccionadas = []
-        if fotos_totales:
-            cols_img = st.columns(3)
-            for i, f in enumerate(fotos_totales):
-                with cols_img[i % 3]:
-                    st.image(f, width=100)
-                    if st.checkbox("Incluir", key=f"foto_{f.name}_{len(st.session_state.hojas)}"):
-                        fotos_seleccionadas.append(f)
-        
-        if st.form_submit_button("➕ GUARDAR HOJA AL PDF"):
-            if titulo_hoja or descripcion:
-                nueva_hoja = {
-                    "titulo": titulo_hoja,
-                    "cliente": cliente,
-                    "fecha": st.session_state.datos_pdf["fecha"],
-                    "descripcion": descripcion,
-                    "fotos": fotos_seleccionadas
-                }
-                st.session_state.hojas.append(nueva_hoja)
+    col_edit, col_prev = st.columns([1, 1])
+
+    with col_edit:
+        st.subheader("📝 Configurar Diapositiva")
+        with st.form("editor_hoja", clear_on_submit=True):
+            diseno = st.selectbox("Elegir Diseño (Nombre en PPT):", nombres_layouts)
+            texto_tecnico = st.text_area("Texto para la Tabla o Cuadro (Times New Roman 12):")
+            
+            st.write("🖼️ **Fotos para los cuadros predeterminados:**")
+            fotos_escogidas = []
+            if fotos_totales:
+                cols_img = st.columns(3)
+                for i, foto in enumerate(fotos_totales):
+                    with cols_img[i % 3]:
+                        st.image(foto, width=90)
+                        if st.checkbox("Usar", key=f"sel_{foto.name}_{len(st.session_state.hojas)}"):
+                            fotos_escogidas.append(foto)
+            
+            if st.form_submit_button("➕ GUARDAR DIAPOSITIVA"):
+                st.session_state.hojas.append({
+                    "layout_idx": nombres_layouts.index(diseno),
+                    "nombre": diseno,
+                    "texto": texto_tecnico,
+                    "fotos": fotos_escogidas
+                })
                 st.rerun()
 
-with col_prev:
-    st.subheader("👁️ Vista Previa del Reporte")
+    with col_prev:
+        st.subheader("👁️ Vista Previa")
+        if st.session_state.hojas:
+            num = st.number_input("Ver Hoja #:", min_value=1, max_value=len(st.session_state.hojas)) - 1
+            h = st.session_state.hojas[num]
+            with st.container(border=True):
+                st.markdown(f"**Diseño:** {h['nombre']}")
+                st.markdown(f"**Texto Guardado:** {h['texto'][:100]}...")
+                st.write(f"🖼️ Fotos: {len(h['fotos'])}")
+            
+            if st.button("🗑️ Eliminar Hoja"):
+                st.session_state.hojas.pop(num)
+                st.rerun()
+
+    # --- GENERACIÓN DEL ARCHIVO FINAL ---
+    st.divider()
     if st.session_state.hojas:
-        idx = st.number_input("Ver Hoja #:", min_value=1, max_value=len(st.session_state.hojas), step=1) - 1
-        h = st.session_state.hojas[idx]
-        
-        with st.container(border=True):
-            st.markdown(f"### {idx+1}. {h['titulo']}")
-            st.markdown(f"**Cliente:** {h['cliente']} | **Fecha:** {h['fecha']}")
-            st.write(f"**Texto:** {h['descripcion']}")
-            if h['fotos']:
-                st.write(f"🖼️ {len(h['fotos'])} fotos en esta página.")
-        
-        if st.button("🗑️ Eliminar esta hoja"):
-            st.session_state.hojas.pop(idx)
-            st.rerun()
-    else:
-        st.info("Añade hojas a la izquierda para ver la previa.")
+        if st.button("🚀 GENERAR Y DESCARGAR REPORTE FINAL"):
+            prs_final = Presentation(io.BytesIO(plantilla.getvalue()))
+            
+            # Borramos las diapositivas de ejemplo que vienen en el archivo original
+            for i in range(len(prs_final.slides) - 1, -1, -1):
+                rId = prs_final.slides._sldIdLst[i].rId
+                prs_final.part.drop_rel(rId)
+                del prs_final.slides._sldIdLst[i]
 
-# --- GENERACIÓN DEL PDF FINAL ---
-st.divider()
-if st.session_state.hojas:
-    if st.button("🚀 GENERAR Y DESCARGAR PDF FINAL"):
-        buffer = io.BytesIO()
-        c = canvas.Canvas(buffer, pagesize=letter)
-        width, height = letter
+            for h in st.session_state.hojas:
+                slide = prs_final.slides.add_slide(prs_final.slide_layouts[h['layout_idx']])
+                
+                # 1. BUSCAR LA TABLA O CUADRO DE TEXTO
+                img_ptr = 0
+                for shape in slide.shapes:
+                    # Caso A: Si es una Tabla
+                    if shape.has_table:
+                        # Buscamos la celda de descripción (usualmente la última o vacía)
+                        for row in shape.table.rows:
+                            for cell in row.cells:
+                                if cell.text == "" or "DESCRIPCIÓN" in cell.text.upper():
+                                    cell.text = h['texto']
+                                    # Aplicamos formato Times New Roman 12
+                                    for paragraph in cell.text_frame.paragraphs:
+                                        for run in paragraph.runs:
+                                            run.font.name = 'Times New Roman'
+                                            run.font.size = Pt(12)
+                    
+                    # Caso B: Si es un Placeholder de Texto (Cuadro de texto predeterminado)
+                    elif shape.is_placeholder and shape.placeholder_format.type in [2, 7]:
+                        shape.text = h['texto']
+                        for p in shape.text_frame.paragraphs:
+                            for r in p.runs:
+                                r.font.name = 'Times New Roman'
+                                r.font.size = Pt(12)
 
-        for h in st.session_state.hojas:
-            # Encabezado
-            c.setFont("Times-Bold", 14)
-            c.drawString(50, height - 50, f"REPORTE: {h['titulo'].upper()}")
-            c.setFont("Times-Roman", 10)
-            c.drawString(50, height - 70, f"Cliente: {h['cliente']} | Fecha: {h['fecha']}")
-            c.line(50, height - 75, 550, height - 75)
+                    # Caso C: Si es un Placeholder de Imagen (Cuadro de foto)
+                    elif shape.is_placeholder and (shape.placeholder_format.type == 18 or "PICTURE" in shape.name.upper()):
+                        if img_ptr < len(h['fotos']):
+                            shape.insert_picture(io.BytesIO(h['fotos'][img_ptr].read()))
+                            h['fotos'][img_ptr].seek(0)
+                            img_ptr += 1
 
-            # Cuerpo de texto (Times New Roman 12)
-            c.setFont("Times-Roman", 12)
-            text_obj = c.beginText(50, height - 100)
-            # Dividir texto por líneas para que quepa
-            lines = h['descripcion'].split('\n')
-            for line in lines:
-                text_obj.textLine(line)
-            c.drawText(text_obj)
-
-            # Insertar Fotos (Acomodo automático)
-            if h['fotos']:
-                x_offset = 50
-                y_offset = height - 450
-                for f in h['fotos']:
-                    img_data = ImageReader(io.BytesIO(f.read()))
-                    c.drawImage(img_data, x_offset, y_offset, width=150, height=150, preserveAspectRatio=True)
-                    x_offset += 170
-                    if x_offset > 400: # Salto de fila de fotos
-                        x_offset = 50
-                        y_offset -= 160
-                    f.seek(0)
-
-            c.showPage() # Siguiente página
-
-        c.save()
-        buffer.seek(0)
-        st.download_button(
-            label="📥 DESCARGAR REPORTE EN PDF",
-            data=buffer,
-            file_name="Reporte_Final_Valero.pdf",
-            mime="application/pdf"
-        )
+            output = io.BytesIO()
+            prs_final.save(output)
+            output.seek(0)
+            
+            st.download_button(
+                label="📥 DESCARGAR REPORTE PPTX EDITADO",
+                data=output.getvalue(),
+                file_name="Reporte_Final_MT_Editado.pptx",
+                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            )
