@@ -134,5 +134,5 @@ if plantilla:
                     os.remove("temp.pptx")
                     os.remove("temp.pdf")
                 except Exception as e:
-                    st.error("Error al generar PDF. Asegúrate de haber instalado LibreOffice en la terminal.")
+                    st.error("Error al generar PDF. Asegúrate de haber instalado LibreOffice en la terminal.") 
                     
