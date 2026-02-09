@@ -6,19 +6,20 @@ import io
 import subprocess
 import os
 
-# Configuración de la App
-st.set_page_config(page_title="MT Valero - Reporte PDF Editable", layout="wide")
+# Configuración profesional de la App
+st.set_page_config(page_title="MT Valero - PDF Editable Pro", layout="wide")
 
 if 'hojas' not in st.session_state:
     st.session_state.hojas = []
 if 'datos_pdf' not in st.session_state:
     st.session_state.datos_pdf = {"cliente": "", "fecha": ""}
 
-st.title("📄 Generador de Reporte PDF Editable")
+st.title("📄 Generador de Reportes PDF Editable")
 
-# --- BARRA LATERAL ---
+# --- BARRA LATERAL: CARGA DE RECURSOS ---
 with st.sidebar:
     st.header("1. Carga de Archivos")
+    # Subir tu plantilla específica
     plantilla = st.file_uploader("Subir Reporte_MT_Final.pptx", type=["pptx"])
     archivo_pdf_valero = st.file_uploader("Subir Hoja Valero (PDF)", type=["pdf"])
     fotos_totales = st.file_uploader("Galería de WhatsApp", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
@@ -29,54 +30,64 @@ with st.sidebar:
             for l in texto.split('\n'):
                 if "Cliente:" in l: st.session_state.datos_pdf["cliente"] = l.split("Cliente:")[1].strip()
                 if "Fecha:" in l: st.session_state.datos_pdf["fecha"] = l.split("Fecha:")[1].strip()
-        st.success("Datos extraídos.")
+        st.success("Datos extraídos correctamente.")
 
-# --- CONSTRUCCIÓN DEL REPORTE ---
-if plantilla:
+# --- CUERPO PRINCIPAL ---
+if not plantilla:
+    st.info("👈 Sube tu plantilla 'Reporte_MT_Final.pptx' para habilitar el editor.")
+else:
+    # Detectar layouts de tu plantilla
     prs_base = Presentation(io.BytesIO(plantilla.getvalue()))
     nombres_layouts = [layout.name for layout in prs_base.slide_layouts]
 
-    col_edit, col_prev = st.columns([1, 1])
+    col_form, col_view = st.columns([1, 1])
 
-    with col_edit:
-        st.subheader("📝 Configurar Diapositiva")
+    with col_form:
+        st.subheader("📝 Configurar Nueva Hoja")
         with st.form("editor_form", clear_on_submit=True):
-            diseno = st.selectbox("Diseño de tu Plantilla:", nombres_layouts)
-            texto_tabla = st.text_area("Texto para la Tabla (Times New Roman 12):")
+            diseno = st.selectbox("Elegir Diseño de Diapositiva:", nombres_layouts)
+            # Texto para la tabla o cuadro técnico
+            descripcion_tecnica = st.text_area("Contenido para la Tabla (Times New Roman 12):")
             
-            st.write("🖼️ **Selecciona fotos:**")
+            st.write("🖼️ **Seleccionar fotos para esta hoja:**")
             fotos_seleccionadas = []
             if fotos_totales:
-                c_f = st.columns(3)
+                cols_img = st.columns(3)
                 for i, f in enumerate(fotos_totales):
-                    with c_f[i % 3]:
+                    with cols_img[i % 3]:
                         st.image(f, width=100)
-                        if st.checkbox("Incluir", key=f"sel_{f.name}_{len(st.session_state.hojas)}"):
+                        # Clave única para evitar errores de duplicado
+                        if st.checkbox("Incluir", key=f"foto_{f.name}_{len(st.session_state.hojas)}"):
                             fotos_seleccionadas.append(f)
             
-            if st.form_submit_button("➕ GUARDAR HOJA"):
+            if st.form_submit_button("➕ GUARDAR HOJA AL REPORTE"):
                 st.session_state.hojas.append({
                     "layout_idx": nombres_layouts.index(diseno),
-                    "texto": texto_tabla,
+                    "texto": descripcion_tecnica,
                     "fotos": fotos_seleccionadas
                 })
                 st.rerun()
 
-    with col_prev:
-        st.subheader("👁️ Vista Previa")
+    with col_view:
+        st.subheader("👁️ Vista Previa del Reporte")
         if st.session_state.hojas:
             idx = st.number_input("Ver Hoja #:", min_value=1, max_value=len(st.session_state.hojas)) - 1
             h = st.session_state.hojas[idx]
-            st.info(f"Hoja guardada con {len(h['fotos'])} fotos.")
-            if st.button("🗑️ Eliminar esta hoja"):
+            st.success(f"Hoja guardada con {len(h['fotos'])} fotos.")
+            if st.button("🗑️ Eliminar Hoja Actual"):
                 st.session_state.hojas.pop(idx)
                 st.rerun()
+        else:
+            st.info("Añade hojas a la izquierda para ver la previa.")
 
-    # --- BOTONES DE DESCARGA ---
+    # --- GENERACIÓN DE ARCHIVOS ---
     st.divider()
     if st.session_state.hojas:
-        # Generar el PPTX en memoria primero
+        st.subheader("🚀 Descargar Reporte Final")
+        
+        # 1. Crear el PPTX interno inyectando datos en tu tabla
         prs_final = Presentation(io.BytesIO(plantilla.getvalue()))
+        # Limpiar hojas de ejemplo
         for i in range(len(prs_final.slides)-1, -1, -1):
             rId = prs_final.slides._sldIdLst[i].rId
             prs_final.part.drop_rel(rId)
@@ -84,55 +95,54 @@ if plantilla:
 
         for h in st.session_state.hojas:
             slide = prs_final.slides.add_slide(prs_final.slide_layouts[h['layout_idx']])
-            img_count = 0
+            img_ptr = 0
             for shape in slide.shapes:
-                # Inyectar en Tabla o Cuadro de Texto
+                # Inyección quirúrgica en tablas o cuadros de texto
                 if shape.has_table:
                     for row in shape.table.rows:
                         for cell in row.cells:
                             if cell.text == "" or "DESCRIPCIÓN" in cell.text.upper():
                                 cell.text = h['texto']
                                 for p in cell.text_frame.paragraphs:
-                                    for run in p.runs:
-                                        run.font.name = 'Times New Roman'
-                                        run.font.size = Pt(12)
+                                    for r in p.runs:
+                                        r.font.name = 'Times New Roman'
+                                        r.font.size = Pt(12)
                 elif shape.is_placeholder and shape.placeholder_format.type in [2, 7]:
                     shape.text = h['texto']
                     for p in shape.text_frame.paragraphs:
                         for r in p.runs:
                             r.font.name = 'Times New Roman'
                             r.font.size = Pt(12)
-                # Inyectar Fotos en Placeholders
+                # Inyección en cuadros de imagen predeterminados
                 elif shape.is_placeholder and (shape.placeholder_format.type == 18 or "PICTURE" in shape.name.upper()):
-                    if img_count < len(h['fotos']):
-                        shape.insert_picture(io.BytesIO(h['fotos'][img_count].read()))
-                        h['fotos'][img_count].seek(0)
-                        img_count += 1
+                    if img_ptr < len(h['fotos']):
+                        shape.insert_picture(io.BytesIO(h['fotos'][img_ptr].read()))
+                        h['fotos'][img_ptr].seek(0)
+                        img_ptr += 1
 
+        # Guardar PPTX en memoria
         output_pptx = io.BytesIO()
         prs_final.save(output_pptx)
         
-        col1, col2 = st.columns(2)
+        c1, c2 = st.columns(2)
+        with c1:
+            st.download_button("📥 DESCARGAR PPTX", output_pptx.getvalue(), "Reporte_Editable.pptx")
         
-        with col1:
-            st.download_button("📥 DESCARGAR PPTX", output_pptx.getvalue(), "Reporte.pptx")
-        
-        with col2:
+        with c2:
             if st.button("🚀 PREPARAR PDF EDITABLE"):
-                # Guardamos temporalmente para convertir
+                # Crear archivos temporales para la conversión
                 with open("temp.pptx", "wb") as f:
                     f.write(output_pptx.getvalue())
                 
                 try:
-                    # Comando para convertir a PDF manteniendo el diseño
+                    # Ejecutar la conversión vía LibreOffice (requiere instalación en terminal)
                     subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "temp.pptx"], check=True)
                     
                     with open("temp.pdf", "rb") as f:
                         st.download_button("✅ DESCARGAR PDF FINAL", f.read(), "Reporte_MT_Final.pdf", "application/pdf")
                     
-                    # Limpieza
+                    # Limpiar rastros
                     os.remove("temp.pptx")
                     os.remove("temp.pdf")
-                except Exception as e:
-                    st.error("Error al generar PDF. Asegúrate de haber instalado LibreOffice en la terminal.") 
-                    
+                except:
+                    st.error("Error: Instala LibreOffice en la terminal del Codespace para activar esta función.")
