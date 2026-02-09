@@ -112,4 +112,4 @@ if plantilla:
         st.rerun()
 else:
     st.info("👋 Por favor, carga tu plantilla .pptx en la barra lateral para comenzar.")
-    
+
