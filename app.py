@@ -3,12 +3,10 @@ from pptx import Presentation
 from pptx.util import Pt, Inches
 import pdfplumber
 import io
-from PIL import Image
 
 # Configuración de página
 st.set_page_config(page_title="Editor MT Valero Pro", layout="wide")
 
-# Inicialización de memoria de sesión
 if 'hojas' not in st.session_state:
     st.session_state.hojas = []
 if 'datos_pdf' not in st.session_state:
@@ -37,37 +35,46 @@ col_edit, col_prev = st.columns([1, 1])
 with col_edit:
     st.subheader("📝 Configurar Nueva Hoja")
     
-    with st.form("form_hoja", clear_on_submit=True):
-        # Campo para nombre de la diapositiva
-        nombre_diapo = st.text_input("Nombre de esta Diapositiva (Título):", placeholder="Ej: Inspección Visual")
-        cliente = st.text_input("Cliente:", value=st.session_state.datos_pdf["cliente"])
-        descripcion = st.text_area("Descripción Técnica (Times New Roman 12):")
+    if plantilla:
+        # Cargamos la plantilla temporalmente para leer los nombres de sus diapositivas
+        prs_temp = Presentation(io.BytesIO(plantilla.getvalue()))
+        # Obtenemos los nombres de los diseños que ya tiene tu PowerPoint
+        nombres_disenos = [layout.name for layout in prs_temp.slide_layouts]
         
-        st.write("🖼️ **Selecciona fotos para esta hoja:**")
-        fotos_seleccionadas = []
-        if fotos_totales:
-            # Mostrar fotos en cuadrícula para elegir visualmente
-            cols_fotos = st.columns(3)
-            for i, f in enumerate(fotos_totales):
-                with cols_fotos[i % 3]:
-                    st.image(f, width=100) # Vista previa pequeña
-                    if st.checkbox("Incluir", key=f"sel_{f.name}_{len(st.session_state.hojas)}"):
-                        fotos_seleccionadas.append(f)
-        
-        enviar = st.form_submit_button("➕ GUARDAR HOJA Y LIMPIAR")
-        
-        if enviar:
-            if nombre_diapo or descripcion or fotos_seleccionadas:
+        with st.form("form_hoja", clear_on_submit=True):
+            # 1. ELIGES EL NOMBRE QUE YA TIENE ASIGNADO EL PPT
+            diseno_elegido = st.selectbox("Selecciona el tipo de diapositiva (Nombre asignado):", nombres_disenos)
+            
+            cliente = st.text_input("Cliente:", value=st.session_state.datos_pdf["cliente"])
+            descripcion = st.text_area("Descripción Técnica (Times New Roman 12):")
+            
+            st.write("🖼️ **Selecciona fotos para esta hoja:**")
+            fotos_seleccionadas = []
+            if fotos_totales:
+                cols_fotos = st.columns(3)
+                for i, f in enumerate(fotos_totales):
+                    with cols_fotos[i % 3]:
+                        st.image(f, width=100)
+                        if st.checkbox("Incluir", key=f"sel_{f.name}_{len(st.session_state.hojas)}"):
+                            fotos_seleccionadas.append(f)
+            
+            enviar = st.form_submit_button("➕ GUARDAR HOJA Y LIMPIAR")
+            
+            if enviar:
+                idx_diseno = nombres_disenos.index(diseno_elegido)
                 nueva_hoja = {
-                    "titulo": nombre_diapo,
+                    "titulo": diseno_elegido, # El nombre asignado en el PPT
+                    "idx_layout": idx_diseno,
                     "cliente": cliente,
                     "fecha": st.session_state.datos_pdf["fecha"],
                     "descripcion": descripcion,
                     "fotos": fotos_seleccionadas
                 }
                 st.session_state.hojas.append(nueva_hoja)
-                st.success(f"✅ Hoja '{nombre_diapo}' guardada.")
+                st.success(f"✅ Hoja '{diseno_elegido}' guardada.")
                 st.rerun()
+    else:
+        st.warning("⚠️ Sube una plantilla (.pptx) en la izquierda para ver los nombres de las diapositivas.")
 
 with col_prev:
     st.subheader("👁️ Vista Previa del Reporte")
@@ -79,31 +86,26 @@ with col_prev:
             st.markdown(f"### {idx+1}. {h['titulo']}")
             st.markdown(f"**Cliente:** {h['cliente']} | **Fecha:** {h['fecha']}")
             st.info(f"**Texto:** {h['descripcion']}")
-            
             if h['fotos']:
-                st.write("**Fotos asignadas:**")
-                cols_v = st.columns(len(h['fotos']) if len(h['fotos']) < 5 else 4)
-                for j, img in enumerate(h['fotos']):
-                    with cols_v[j % 4]:
-                        st.image(img, width=80)
+                st.write(f"🖼️ {len(h['fotos'])} fotos seleccionadas.")
         
         if st.button("🗑️ Eliminar Hoja Actual"):
             st.session_state.hojas.pop(idx)
             st.rerun()
-    else:
-        st.info("Aquí verás el resumen de las diapositivas que vayas creando.")
 
 # --- GENERACIÓN FINAL ---
 st.divider()
 if st.session_state.hojas and plantilla:
-    if st.button("🚀 DESCARGAR REPORTE FINAL (.PPTX)"):
+    if st.button("🚀 DESCARGAR REPORTE FINAL"):
         prs = Presentation(io.BytesIO(plantilla.read()))
         for h in st.session_state.hojas:
-            slide = prs.slides.add_slide(prs.slide_layouts[1])
+            # USA EL DISEÑO EXACTO QUE ELEGISTE POR NOMBRE
+            slide = prs.slides.add_slide(prs.slide_layouts[h['idx_layout']])
+            
             for shape in slide.placeholders:
                 nombre_shape = shape.name.upper()
                 if "TITLE" in nombre_shape or "TITULO" in nombre_shape: 
-                    shape.text = h['titulo'] if h['titulo'] else h['cliente']
+                    shape.text = h['titulo']
                 elif any(x in nombre_shape for x in ["BODY", "CONTENT"]):
                     tf = shape.text_frame
                     tf.text = h['descripcion']
@@ -112,7 +114,6 @@ if st.session_state.hojas and plantilla:
                             run.font.name = 'Times New Roman'
                             run.font.size = Pt(12)
             
-            # Acomodo de fotos en el PPT
             x_pos = Inches(0.5)
             for f in h['fotos']:
                 slide.shapes.add_picture(io.BytesIO(f.read()), x_pos, Inches(4.5), width=Inches(2.4))
